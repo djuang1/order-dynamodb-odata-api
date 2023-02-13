@@ -109,9 +109,15 @@ output application/json
     <logger level="INFO" message="In DELETE\Orders\ENTITY flow" />
   </flow>
   <flow name="GET\Orders\ENTITY_COLLECTION">
-    <apikit-odata:request-entity-collection-listener config-ref="odata-config" path="/Orders" method="GET" />
+    <apikit-odata:request-entity-collection-listener config-ref="odata-config" path="/Orders" method="GET" >
+			<apikit-odata:collection-success-response >
+				<apikit-odata:entity-collection-success-response count="#[vars.count]" />
+			</apikit-odata:collection-success-response>
+		</apikit-odata:request-entity-collection-listener>
     <logger level="INFO" message="In GET\Orders\ENTITY_COLLECTION flow" />
 		<dynamodb:scan tableName="orders" doc:name="Scan" doc:id="737e10b0-94c9-40e0-9d9b-bbaf25eb4a11" config-ref="Amazon_DynamoDB_Configuration" select="SPECIFIC_ATTRIBUTES" projectionExpression='#["order_id,order_desc,customer_id,order_status"]'/>
+		<logger level="INFO" doc:name="Logger" doc:id="aed247f0-0e17-4f27-9d7c-e412671cdd93" />
+		<set-variable value="#[payload.count]" doc:name="Set Variable" doc:id="4c70b591-ca1d-4660-adc2-886de7a9e630" variableName="count"/>
 		<apikit-odata:serialize-entity-collection config-ref="odata-config" path="/Orders" method="GET">
       <apikit-odata:inbound-content><![CDATA[#[%dw 2.0 
 output application/json 
