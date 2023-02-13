@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:tls="http://www.mulesoft.org/schema/mule/tls"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:dynamodb="http://www.mulesoft.org/schema/mule/dynamodb" xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit-odata="http://www.mulesoft.org/schema/mule/apikit-odata" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/tls http://www.mulesoft.org/schema/mule/tls/current/mule-tls.xsd http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/apikit-odata http://www.mulesoft.org/schema/mule/apikit-odata/current/mule-apikit-odata.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd 
+http://www.mulesoft.org/schema/mule/dynamodb http://www.mulesoft.org/schema/mule/dynamodb/current/mule-dynamodb.xsd">
+  <apikit-odata:config name="odata-config" apiDefinition="api/odata.csdl.xml" />
+  <http:listener-config name="HTTP_Listener_Config">
+   <http:listener-connection host="0.0.0.0" port="8082" protocol="HTTPS">
+			<tls:context >
+				<tls:key-store type="jks" path="keystore.jks" alias="mule" keyPassword="password" password="password" />
+			</tls:context>
+		</http:listener-connection>
+  </http:listener-config>
+  <dynamodb:config name="Amazon_DynamoDB_Configuration" doc:name="Amazon DynamoDB Configuration" doc:id="10ab3a80-4fc4-472e-9112-cbc8881d825d" >
+		<dynamodb:basic-connection accessKey="${aws.key}" secretKey="${aws.secret}" />
+	</dynamodb:config>
+	<configuration-properties doc:name="Configuration properties" doc:id="104bbc63-a34f-45bb-822d-e9405ee59017" file="mule-properties.yaml" />
+	<flow name="main-odata-flow">
+    <http:listener config-ref="HTTP_Listener_Config" path="/api/*">
+      <http:response statusCode="#[attributes.statusCode default 200]">
+        <http:headers>#[attributes.headers default {}]</http:headers>
+      </http:response>
+      <http:error-response statusCode="#[vars.statusCode default 500]">
+        <http:body>#[payload]</http:body>
+        <http:headers>#[vars.headers default {}]</http:headers>
+      </http:error-response>
+    </http:listener>
+    <apikit-odata:route config-ref="odata-config">
+      <apikit-odata:http-request-parameters listenerPath="#[attributes.listenerPath]" method="#[attributes.method]" scheme="#[upper(attributes.scheme)]" host="#[attributes.headers.'host']" httpHeaders="#[attributes.headers]" queryString="#[(attributes.rawRequestUri scan /(?&lt;=^[^#?]*\?)[^#]*/)[0][0] default '']" maskedRequestPath="#[attributes.maskedRequestPath]" />
+    </apikit-odata:route>
+    <error-handler name="Error_Handler">
+      <on-error-propagate name="On_Error_Propagate" enableNotifications="true" logException="true" type="MULE:ANY">
+        <ee:transform>
+          <ee:message>
+            <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	error: {
+		code: error.errorMessage.payload.code default "UNKNOWN",
+		message: error.errorMessage.payload.message default error.description,
+		target: error.errorMessage.payload.target,
+		details: error.errorMessage.payload.details default [{code: "UNKNOWN", message: error.detailedDescription, target: null}],
+		innererror: error.errorMessage.payload.innerError default error.childErrors
+	}
+}]]></ee:set-payload>
+          </ee:message>
+          <ee:variables>
+            <ee:set-variable variableName="statusCode"><![CDATA[error.errorMessage.payload.statusCode default 500]]></ee:set-variable>
+          </ee:variables>
+        </ee:transform>
+      </on-error-propagate>
+    </error-handler>
+  </flow>
+  <flow name="GET\Orders\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/Orders" method="GET" />
+    <logger level="INFO" message="In GET\Orders\ENTITY flow" />
+    <apikit-odata:transform-to-sql-select doc:name="Transform to sql select" doc:id="3015e396-f2cd-4ce2-96e7-0b4615dbc9f2" config-ref="odata-config" entitySetName="#[attributes.entitySetName]">
+			<apikit-odata:request-parameters entityTypeFields="#[attributes.odataRequestAttributes.entityTypeFields]" entityTypeKeys="#[attributes.odataRequestAttributes.entityTypeKeys]" systemQueryOptions="#[attributes.odataRequestAttributes.systemQueryOptions]" entityTypeName="#[attributes.odataRequestAttributes.entityTypeName]" />
+		</apikit-odata:transform-to-sql-select>
+		<ee:transform doc:name="Transform Message" doc:id="f209ea07-5b6e-4827-9797-7964012f8471" >
+			<ee:message >
+				<ee:set-payload ><![CDATA[%dw 2.0
+output application/java
+---
+{
+	order_id: {
+		s: attributes.queryParameters.parameter1
+	}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+		<dynamodb:get-item tableName="orders" doc:name="Get item" doc:id="46ba6871-3b2d-4f8d-a633-1642a2d177f2" config-ref="Amazon_DynamoDB_Configuration"/>
+		<apikit-odata:serialize-entity config-ref="odata-config" path="/Orders" method="GET">
+      <apikit-odata:inbound-content><![CDATA[#[%dw 2.0
+output application/json
+---
+{
+	OrderID: payload.item.order_id.s default "",
+	OrderDesc: payload.item.order_desc.s default "",
+	CustomerID: payload.item.customer_id.s default "",
+	OrderStatus: payload.item.order_status.s default "",
+}]]]></apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="POST\Orders\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/Orders" method="POST" />
+    <logger level="INFO" message="In POST\Orders\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/Orders" method="POST">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="PATCH\Orders\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/Orders" method="PATCH" />
+    <logger level="INFO" message="In PATCH\Orders\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/Orders" method="PATCH">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="PUT\Orders\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/Orders" method="PUT" />
+    <logger level="INFO" message="In PUT\Orders\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/Orders" method="PUT">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="DELETE\Orders\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/Orders" method="DELETE" />
+    <logger level="INFO" message="In DELETE\Orders\ENTITY flow" />
+  </flow>
+  <flow name="GET\Orders\ENTITY_COLLECTION">
+    <apikit-odata:request-entity-collection-listener config-ref="odata-config" path="/Orders" method="GET" />
+    <logger level="INFO" message="In GET\Orders\ENTITY_COLLECTION flow" />
+		<dynamodb:scan tableName="orders" doc:name="Scan" doc:id="737e10b0-94c9-40e0-9d9b-bbaf25eb4a11" config-ref="Amazon_DynamoDB_Configuration" select="SPECIFIC_ATTRIBUTES" projectionExpression='#["order_id,order_desc,customer_id,order_status"]'/>
+		<apikit-odata:serialize-entity-collection config-ref="odata-config" path="/Orders" method="GET">
+      <apikit-odata:inbound-content><![CDATA[#[%dw 2.0 
+output application/json 
+--- 
+{
+	"value": payload.items map {
+		OrderID: $.order_id.s,
+		OrderDesc: $.order_desc.s,
+		CustomerID: $.customer_id.s,
+		OrderStatus: $.order_status.s	
+	}
+}]]]></apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity-collection>
+  </flow>
+  <flow name="GET\OrderItems\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/OrderItems" method="GET" />
+    <logger level="INFO" message="In GET\OrderItems\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/OrderItems" method="GET">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="POST\OrderItems\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/OrderItems" method="POST" />
+    <logger level="INFO" message="In POST\OrderItems\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/OrderItems" method="POST">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="PATCH\OrderItems\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/OrderItems" method="PATCH" />
+    <logger level="INFO" message="In PATCH\OrderItems\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/OrderItems" method="PATCH">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="PUT\OrderItems\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/OrderItems" method="PUT" />
+    <logger level="INFO" message="In PUT\OrderItems\ENTITY flow" />
+    <apikit-odata:serialize-entity config-ref="odata-config" path="/OrderItems" method="PUT">
+      <apikit-odata:inbound-content>#[%dw 2.0 output application/json --- payload]</apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity>
+  </flow>
+  <flow name="DELETE\OrderItems\ENTITY">
+    <apikit-odata:request-entity-listener config-ref="odata-config" path="/OrderItems" method="DELETE" />
+    <logger level="INFO" message="In DELETE\OrderItems\ENTITY flow" />
+  </flow>
+  <flow name="GET\OrderItems\ENTITY_COLLECTION">
+    <apikit-odata:request-entity-collection-listener config-ref="odata-config" path="/OrderItems" method="GET" />
+    <logger level="INFO" message="In GET\OrderItems\ENTITY_COLLECTION flow" />
+    <dynamodb:scan tableName="orders" doc:name="Scan" doc:id="a4b9cc91-d323-4668-a57a-c682d0f8dffd" config-ref="Amazon_DynamoDB_Configuration" select="SPECIFIC_ATTRIBUTES" projectionExpression='#["order_id, order_items"]'/>
+		<apikit-odata:serialize-entity-collection config-ref="odata-config" path="/OrderItems" method="GET">
+      <apikit-odata:inbound-content><![CDATA[#[%dw 2.0 
+output application/json 
+--- 
+{
+	"value": flatten((payload.items map (v1, i1) -> {
+		child: v1.order_items.l map (v2, i2) ->{
+			OrderID: v1.order_id.s,
+			OrderItemsID: v2.m.order_items_id.s,
+			ProductID: v2.m.product_id.s
+		}
+	}).*child)
+}]]]></apikit-odata:inbound-content>
+    </apikit-odata:serialize-entity-collection>
+  </flow>
+</mule>

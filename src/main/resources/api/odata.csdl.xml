@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<edmx:Edmx xmlns:edmx="http://docs.oasis-open.org/odata/ns/edmx" Version="4.0">
+  <edmx:DataServices>
+    <Schema xmlns="http://docs.oasis-open.org/odata/ns/edm" Namespace="odata.v4">
+      <EntityType Name="Orders">
+        <Key>
+          <PropertyRef Name="OrderID" />
+        </Key>
+        <Property Name="OrderID" Type="Edm.String" Nullable="false" />
+        <Property Name="OrderDesc" Type="Edm.String" Unicode="false" MaxLength="100" />
+        <Property Name="CustomerID" Type="Edm.String" />
+        <Property Name="OrderStatus" Type="Edm.String" />
+        <NavigationProperty Name="OrderItems" Type="Collection(odata.v4.OrderItems)"/>
+      </EntityType>
+      <EntityType Name="OrderItems">
+        <Key>
+          <PropertyRef Name="OrderItemsID" />
+        </Key>
+        <Property Name="OrderItemsID" Type="Edm.String" Nullable="false" />
+        <Property Name="ProductID" Type="Edm.String" Unicode="false" MaxLength="100" />
+        <Property Name="OrderID" Type="Edm.String" Nullable="false" />
+        <NavigationProperty Name="Orders" Type="odata.v4.Orders">
+        	<ReferentialConstraint Property="OrderID" ReferencedProperty="OrderID" />
+        </NavigationProperty>
+      </EntityType>
+
+      <EntityContainer Name="Container">
+        <EntitySet Name="Orders" EntityType="odata.v4.Orders">
+        	<NavigationPropertyBinding Path="OrderItems" Target="OrderItems"/>
+        </EntitySet>
+        <EntitySet Name="OrderItems" EntityType="odata.v4.OrderItems" />
+      </EntityContainer>
+    </Schema>
+  </edmx:DataServices>
+</edmx:Edmx>
